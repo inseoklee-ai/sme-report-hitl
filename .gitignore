@@ -29,3 +29,6 @@ output/dev/streamlit.log
 *.sqlite
 *.sqlite-*
 *.db
+
+# 실행하면 생기는 것 — 발송함·알림·새 조사 기록. 증거는 docs/evidence/ 에 따로 남긴다
+output/
