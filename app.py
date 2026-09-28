@@ -250,9 +250,24 @@ with 탭[2]:
                    "멈춘 이유": " · ".join(y.split(" ")[0] for y in x["멈춘이유"]) or "(자동)",
                    "담당자 답": " → ".join(e.get("결정", e.get("사건", "")) for e in x["이력"])}
                   for x in 끝], hide_index=True)
+    실패 = [x for x in 끝 if str(x["결과"]).startswith("발송 ")]
+    if 실패:
+        st.markdown(f"##### ⚠ 나가지 않은 보고서 {len(실패)}건 — 재발송")
+        st.caption("발송 실패·차단은 끝난 것으로 치지 않습니다. 원인(예: SMTP 인증)을 고친 뒤 다시 보내세요.")
+        rid = st.selectbox("재발송할 건", [x["의뢰ID"] for x in 실패],
+                           format_func=lambda i: next(f"{i} · {x['고객']} · {x['결과']} · {x['발송'].get('사유', '')[:60]}"
+                                                      for x in 실패 if x["의뢰ID"] == i))
+        실제재 = st.checkbox("실제 메일로 보내기", value=False, key="resend_real", disabled=_메일모드() != "smtp")
+        if st.button("재발송"):
+            rec = H.재발송(rid, 파일만=not 실제재)
+            글 = f"{rid} — {rec['모드']} · {rec['상태']} {rec.get('사유', '')}"
+            if rec["상태"] == "발송":
+                st.success(글)
+            else:
+                st.error(글)
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("##### 담당자 직접 처리 (반려)")
+        st.markdown("##### 담당자 직접 처리 (반려 · 발송 실패)")
         st.dataframe([{k: x[k] for k in ("thread_id", "고객", "사유", "시각")} for x in _jsonl(H.MANUAL)],
                      hide_index=True)
         st.markdown("##### 상급자 이관 (3일 규칙)")

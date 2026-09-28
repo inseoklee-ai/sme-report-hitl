@@ -199,6 +199,13 @@ def 발송(s: State) -> dict:
                     force_file=q.get("force_file", False) or (s.get("답") or {}).get("파일만", False))
     결정 = (s.get("답") or {}).get("결정")
     결과 = {"approve": "승인 발송", "edit": "수정 발송"}.get(결정, "자동 발송")
+    if rec["상태"] != "발송":
+        # 7단계에서 찾았다: SMTP 인증 실패인데 '자동 발송' 으로 끝나 보냈다고 착각할 뻔했다.
+        # 나가지 않은 보고서는 끝난 것으로 치지 않고 직접 처리 목록에 올린다 — 재발송() 으로 다시 보낸다.
+        결과 = f"발송 {rec['상태']} ({결과} 시도)"
+        _기록(MANUAL, {"thread_id": q["id"], "고객": q["고객"], "질문": q["질문"],
+                      "사유": f"발송 {rec['상태']} — {rec.get('사유', '')[:80]}", "멈춘이유": s.get("멈춘이유", []),
+                      "시각": _지금()})
     return {"발송": rec, "결과": 결과}
 
 
@@ -317,6 +324,20 @@ def 답하기(tid: str, 결정: str, 사유: str = "", 담당자: str = "담당�
 
 def 상태(tid: str) -> dict:
     return app().get_state(cfg(tid)).values
+
+
+def 재발송(tid: str, 파일만: bool = False) -> dict:
+    """발송 실패·차단으로 끝난 건을 다시 보낸다 (같은 thread 는 '발송' 이 한 번 성공하면 더 나가지 않는다)."""
+    v = app().get_state(cfg(tid)).values
+    if not str(v.get("결과", "")).startswith("발송 "):
+        raise ValueError(f"{tid} 는 발송 실패 건이 아닙니다 (결과: {v.get('결과')})")
+    q, r = v["의뢰"], v["보고서"]
+    rec = mailer.발송(tid, q["고객"], q["수신자"], f"[SME 리서치] {r['제목']}", v.get("발송본") or r["report"],
+                    force_file=파일만)
+    if rec["상태"] == "발송":
+        app().update_state(cfg(tid), {"발송": rec, "결과": v["결과"].split("(")[-1].replace(" 시도)", "") + " (재발송)",
+                                      "이력": [{"사건": "재발송", "모드": rec["모드"], "시각": _지금()}]})
+    return rec
 
 
 def 초기화() -> None:
