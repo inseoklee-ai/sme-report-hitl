@@ -48,6 +48,8 @@ def main():
     llm = {v["run_id"]: v for v in _jsonl(J.LABELS / "llm.jsonl")}
     human = {v["run_id"]: v for v in _jsonl(J.LABELS / "human.jsonl")}
     rows = [r for r in J.표본() if r["run_id"] in llm]
+    for r in rows:
+        r["검수"] = J.검수(r["질문"], r["report"])          # 캐시에서 꺼낸다 — API 호출 없음 (C8 계산용)
     L = [f"# 4단계 — 정답 라벨과 승인 기준 검증", "",
          f"표본 {len(rows)}건 (297건에서 질문별 층화, 시드 {J.시드}) · AI 판정 {J.JUDGE_MODEL} · 사람 판정 {len(human)}건", ""]
 
@@ -86,13 +88,14 @@ def main():
     L += [f"## 2. 기준별 개입률 · 놓침 · 헛멈춤 (정답: 사람이 봤어야 함 {n_true}/{len(rows)}건)", "",
           "- 개입률: 사람에게 온 비율 · 놓침: 봤어야 하는데 자동으로 나간 건 · 헛멈춤: 볼 필요 없는데 사람에게 온 건", "",
           "### 2-1. 기준 하나씩", "", "| 기준 | 멈춤 | 개입률 | 잡음 | 놓침 | 헛멈춤 |", "|---|---:|---:|---:|---:|---:|"]
-    singles = [()] + [(k,) for k in C.후보] + [tuple(C.후보)]
+    코드 = [k for k in C.후보 if k != "C8"]          # C8 은 AI 판정 정답과 같은 판정이라(순환) 여기서 빼고 4절에서 사람 판정으로 잰다
+    singles = [()] + [(k,) for k in 코드] + [tuple(코드)]
     for combo in singles:
         m = 측정(rows, 정답, 걸림, combo)
         L.append(f"| {m['기준']} | {m['멈춤']} | {m['개입률']}% | {m['잡음']} | {m['놓침']} | {m['헛멈춤']} |")
 
     # 모든 조합 중 파레토(놓침·헛멈춤 둘 다 더 나은 조합이 없는 것)
-    allm = [측정(rows, 정답, 걸림, c) for n in range(0, len(C.후보) + 1) for c in itertools.combinations(C.후보, n)]
+    allm = [측정(rows, 정답, 걸림, c) for n in range(0, len(코드) + 1) for c in itertools.combinations(코드, n)]
     pareto = [m for m in allm if not any(o["놓침"] <= m["놓침"] and o["헛멈춤"] <= m["헛멈춤"]
                                           and (o["놓침"], o["헛멈춤"]) != (m["놓침"], m["헛멈춤"]) for o in allm)]
     seen, front = set(), []
@@ -116,8 +119,6 @@ def main():
                 L.append(f"  - {b['판정']} ({b['이유']}) — {b['문장'][:100]}")
 
     # ④ C8 을 더한 최종 기준 — 사람 판정 30건으로만 잰다 (AI 판정 정답과 C8 은 같은 판정이라 순환)
-    for r in rows:
-        r["검수"] = J.검수(r["질문"], r["report"])          # 캐시에서 꺼낸다 — API 호출 없음
     hs = [r for r in rows if r["run_id"] in human]
     code = lambda r: any(C.전부재기(r)[k] for k in ("C2", "C3", "C6"))
     n_stop = sum(human[r["run_id"]]["should_stop"] for r in hs)

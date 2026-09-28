@@ -196,7 +196,7 @@ def 발송(s: State) -> dict:
     q, r = s["의뢰"], s["보고서"]
     본 = s.get("발송본") or r["report"]
     rec = mailer.발송(q["id"], q["고객"], q["수신자"], f"[SME 리서치] {r['제목']}", 본,
-                    force_file=q.get("force_file", False))
+                    force_file=q.get("force_file", False) or (s.get("답") or {}).get("파일만", False))
     결정 = (s.get("답") or {}).get("결정")
     결과 = {"approve": "승인 발송", "edit": "수정 발송"}.get(결정, "자동 발송")
     return {"발송": rec, "결과": 결과}
@@ -293,7 +293,8 @@ def 끝난목록() -> list[dict]:
 
 
 def 답하기(tid: str, 결정: str, 사유: str = "", 담당자: str = "담당자", 지시: str = "",
-         방식: str = "", 수정본: str = "") -> dict:
+         방식: str = "", 수정본: str = "", 파일만: bool = False) -> dict:
+    """파일만=True 면 SEND_MODE 가 smtp 여도 이 건은 파일로만 낸다 (웹 데모의 '실제 메일로 보내기' 가 꺼진 경우)."""
     """담당자 답을 검사한 뒤 멈춘 자리부터 이어간다. 규칙에 어긋난 답은 그래프에 넣지 않고 거절한다."""
     snap = app().get_state(cfg(tid))
     if not (snap.next and snap.tasks and snap.tasks[0].interrupts):
@@ -309,12 +310,25 @@ def 답하기(tid: str, 결정: str, 사유: str = "", 담당자: str = "담당�
         raise ValueError("다시 판정에는 지시가 필요합니다 (예: '한국 기준은 중소기업 문서로 다시')")
     if 결정 == "edit" and 방식 != "오류문장빼기" and not 수정본.strip():
         raise ValueError("수정 후 승인은 --방식 오류문장빼기 또는 수정본이 필요합니다")
-    답 = {"결정": 결정, "사유": 사유, "지시": 지시, "방식": 방식, "수정본": 수정본, "담당자": 담당자, "시각": _지금()}
+    답 = {"결정": 결정, "사유": 사유, "지시": 지시, "방식": 방식, "수정본": 수정본, "담당자": 담당자, "시각": _지금(),
+         "파일만": 파일만}
     return _요약(tid, app().invoke(Command(resume=답), cfg(tid)))
 
 
 def 상태(tid: str) -> dict:
     return app().get_state(cfg(tid)).values
+
+
+def 초기화() -> None:
+    """시연 초기화 — 대기 건 저장소와 발송·알림·이관 기록을 지운다 (output/ 안만)."""
+    global _app
+    if _app is not None:
+        _app.checkpointer.conn.close()
+        _app = None
+    for p in list(G.OUT.glob("checkpoints.sqlite*")) + [NOTICES, MANUAL, ESCALATIONS, mailer.OUTBOX_LOG]:
+        p.unlink(missing_ok=True)
+    import shutil
+    shutil.rmtree(mailer.OUTBOX_DIR, ignore_errors=True)
 
 
 def sweep(now: datetime | None = None) -> list[dict]:

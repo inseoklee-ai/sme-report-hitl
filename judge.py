@@ -38,6 +38,13 @@ PRICE = {"gpt-4o": (2.50, 10.00), EMB_MODEL: (0.02, 0.0)}     # 달러 / 100만 
 표본수, 시드 = 150, 20260928
 SAMPLE = LABELS / "sample.json"
 오류판정 = {"근거없음", "모순", "대상착오"}
+# 절 이름표 줄 (예: "기술 수용 모델  _(큰그림 담당)_") — 문장이 아니다. 판정 캐시에는 남아 있지만 세지 않는다.
+# 6단계 화면을 보다가 찾았다: 이름표 125줄 중 44줄이 근거없음 · 1줄이 판정실패로 C8 을 부풀리고, 빼고 발송이 절 제목을 지웠다.
+이름표 = re.compile(r"_\((?:[^)]*담당|혼자)\)_\s*$")
+
+
+def 판정문장(report: str) -> list[str]:
+    return [s for s in C._본문(report) if not 이름표.search(s)]
 
 
 def _client():
@@ -246,7 +253,7 @@ def 판정표() -> dict[str, dict]:
 def 검수(질문: str, report: str) -> dict:
     """파이프라인의 검수 노드가 부른다 — 보고서 한 건의 문장마다 판정. 이미 판정한 문장은 캐시에서 꺼내므로
     지난 기록(표본 150건)은 비용 0, 새 보고서는 약 2센트."""
-    sents = C._본문(report)
+    sents = 판정문장(report)
     items = [{"id": _h(질문, s), "qid": None, "질문": 질문, "문장": s, "인용": C.CITE.findall(s)} for s in sents]
     uniq = list({x["id"]: x for x in items}.values())
     uniq = 대목붙이기(uniq)
@@ -269,7 +276,7 @@ def 보고서라벨():
     LABELS.mkdir(parents=True, exist_ok=True)
     rows, miss = [], 0
     for r in 표본():
-        sents = C._본문(r["report"])
+        sents = 판정문장(r["report"])
         vv = [(s, vs.get(_h(r["질문"], s))) for s in sents]
         miss += sum(1 for _, v in vv if v is None)
         bad = [{"문장": s, "판정": v["판정"], "구체": v.get("구체", False), "이유": v["이유"]}
