@@ -19,6 +19,7 @@ def _setup(**env):
     tmp = Path(tempfile.mkdtemp())
     mailer.OUTBOX_DIR, mailer.OUTBOX_LOG = tmp / "outbox", tmp / "outbox.jsonl"
     mailer.ROOT = tmp
+    mailer.KEYS_ENV = str(tmp / "없음.env")         # 이 PC 의 keys.env(실제 SMTP 설정)를 읽지 않는다
     mailer._smtp = lambda to, subject, body: 보낸것.append(to)
     보낸것.clear()
     for k in ("SEND_MODE", "DEMO_PUBLIC", "MAIL_ALLOWLIST"):
