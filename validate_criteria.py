@@ -130,7 +130,7 @@ def main():
         stop = lambda r: code(r) or bool(C.C8_AI검수(r, k))
         fn = sum(1 for r in hs if human[r["run_id"]]["should_stop"] and not stop(r))
         fp = sum(1 for r in hs if not human[r["run_id"]]["should_stop"] and stop(r))
-        L.append(f"| C8 오류 ≥ {k}{' ← 채택' if k == 4 else ''} | {fn}/{n_stop} | {fp}/{len(hs) - n_stop} | "
+        L.append(f"| C8 오류 ≥ {k}{' ← 채택' if k == C.C8_문턱 else ''} | {fn}/{n_stop} | {fp}/{len(hs) - n_stop} | "
                  f"{100 * sum(1 for r in rows if stop(r)) / len(rows):.0f}% |")
     fin = [r for r in rows if C.판정(r)]
     L += ["", f"**최종 기준 {' · '.join(C.켜진기준)}** — 표본 150건 중 {len(fin)}건 멈춤 (개입률 {100*len(fin)/len(rows):.0f}%), "

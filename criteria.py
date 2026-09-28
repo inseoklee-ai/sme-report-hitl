@@ -127,7 +127,12 @@ def C7_고위험주제(rec: dict) -> list[str]:
     return [w for w in 고위험어 if w in 글]
 
 
-def C8_AI검수(rec: dict, k: int = 4) -> list[str]:
+# C8 문턱. 4단계에서 4 로 정했다가, 6단계에서 절 이름표 줄을 검수에서 빼고 다시 재니 k=4 의 놓침이 2→4/25 로 늘어
+# 결정 A(놓침을 막는다)의 취지대로 3 으로 낮췄다 (docs/evidence/step4_validation.md 4절).
+C8_문턱 = 3
+
+
+def C8_AI검수(rec: dict, k: int = C8_문턱) -> list[str]:
     """AI 검수(judge.검수 — 문장마다 인용 원문 대목과 대조, gpt-4o)에서 근거없음·모순·대상착오 문장이 k개 이상.
     검수 결과가 없는 기록(검수 전)은 계산하지 않는다. 검수에 실패한 문장이 있으면 확인할 수 없으니 멈춘다."""
     g = rec.get("검수")
@@ -146,7 +151,7 @@ def C8_AI검수(rec: dict, k: int = 4) -> list[str]:
     "C5": ("부족한 절 남음", C5_부족한절남음),
     "C6": ("국내 질문에 해외 근거", C6_국내질문_해외근거),
     "C7": ("고위험 주제어", C7_고위험주제),
-    "C8": ("AI 검수 오류 문장 4개 이상", C8_AI검수),
+    "C8": (f"AI 검수 오류 문장 {C8_문턱}개 이상", C8_AI검수),
 }
 
 # 4단계에서 확정 (docs/evidence/step4_validation.md). 놓침을 막는 쪽(A)을 골랐다 —
