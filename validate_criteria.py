@@ -122,20 +122,38 @@ def main():
     hs = [r for r in rows if r["run_id"] in human]
     code = lambda r: any(C.전부재기(r)[k] for k in ("C2", "C3", "C6"))
     n_stop = sum(human[r["run_id"]]["should_stop"] for r in hs)
-    L += ["", "## 4. C8 (AI 검수) 문턱 — 사람 판정 30건 기준", "",
+    L += ["", "## 4. C8 (AI 검수) — 사람 판정 30건 기준", "",
           f"사람 판정: 멈춤 {n_stop} · 통과 {len(hs) - n_stop}. 정답이 AI 판정이면 C8 이 자기 자신과 비교되므로(순환) "
-          "여기서는 사람 판정만 정답으로 쓴다. 사람 판정은 AI 검토 도구를 참고했다(AI 보조 사람 판정).", "",
-          "| 기준 (C2·C3·C6 과 함께) | 사람 기준 놓침 | 사람 기준 헛멈춤 | 표본 150건 개입률 |", "|---|---:|---:|---:|"]
-    for k in (1, 2, 3, 4, 5, 6, 8, 10):
-        stop = lambda r: code(r) or bool(C.C8_AI검수(r, k))
-        fn = sum(1 for r in hs if human[r["run_id"]]["should_stop"] and not stop(r))
-        fp = sum(1 for r in hs if not human[r["run_id"]]["should_stop"] and stop(r))
-        L.append(f"| C8 오류 ≥ {k}{' ← 채택' if k == C.C8_문턱 else ''} | {fn}/{n_stop} | {fp}/{len(hs) - n_stop} | "
-                 f"{100 * sum(1 for r in rows if stop(r)) / len(rows):.0f}% |")
+          "여기서는 사람 판정만 정답으로 쓴다. 사람 판정은 AI 검토 도구를 참고했다(AI 보조 사람 판정).", ""]
+    import judge as _J
+    승인8 = set(json.loads((J.G.ROOT / "docs" / "evidence" / "step7_approved.json").read_text(encoding="utf-8"))["run_ids"])         if (J.G.ROOT / "docs" / "evidence" / "step7_approved.json").exists() else set()
+
+    def 표(제목, 세기, ks, 채택):
+        out = [f"### {제목}", "", "| C8 (C2·C3·C6 과 함께) | 사람 기준 놓침 | 사람 기준 헛멈춤 | 표본 150건 개입률 | 7단계 그대로 승인한 8건 중 멈춤 |",
+               "|---|---:|---:|---:|---:|"]
+        for k in ks:
+            stop = lambda r: code(r) or r["검수"]["판정실패"] > 0 or 세기(r) >= k
+            fn = sum(1 for r in hs if human[r["run_id"]]["should_stop"] and not stop(r))
+            fp = sum(1 for r in hs if not human[r["run_id"]]["should_stop"] and stop(r))
+            ap = sum(1 for r in rows if r["run_id"] in 승인8 and stop(r))
+            out.append(f"| ≥ {k}{' ← ' + 채택 if 채택 and k == int(채택.split('=')[1]) else ''} | {fn}/{n_stop} | "
+                       f"{fp}/{len(hs) - n_stop} | {100 * sum(1 for r in rows if stop(r)) / len(rows):.0f}% | {ap}/{len(승인8)} |")
+        return out + [""]
+
+    전체 = lambda r: sum(1 for x in r["검수"]["문장"] if x["판정"] in _J.오류판정)
+    치명 = lambda r: sum(1 for x in r["검수"]["문장"] if C.치명(x))
+    L += 표("v1 — 근거없음·모순·대상착오 전부를 센다 (6단계까지)", 전체, (1, 2, 3, 4, 5, 6, 8, 10), "v1 채택 k=3")
+    L += ["7단계에서 v1 으로 운영해 보니 짚힌 오류 645문장 중 486(75%)이 구체 사실 없는 일반 서술의 근거없음이었고, "
+          "담당자는 그런 건을 9건 중 8건 그대로 승인했다('상식 수준에서 크게 벗어나지 않는다'). 그래서 치명 문장만 센다.", ""]
+    L += 표("v2 — 치명 문장만 센다: 모순 · 대상착오 · 구체 사실(수치·기준·고유명사·연도)의 근거없음 (지금)", 치명, (1, 2, 3),
+           "v2 채택 k=1")
     fin = [r for r in rows if C.판정(r)]
-    L += ["", f"**최종 기준 {' · '.join(C.켜진기준)}** — 표본 150건 중 {len(fin)}건 멈춤 (개입률 {100*len(fin)/len(rows):.0f}%), "
-          f"자동 발송 {len(rows) - len(fin)}건.", "",
-          "- 놓침을 막는 쪽을 골랐다(4단계 결정 A): 틀린 보고서가 고객에게 가면 되돌릴 수 없고, 헛멈춤은 검토 시간만 든다.",
+    L += [f"**최종 기준 {' · '.join(C.켜진기준)} (C8 v2, 치명 ≥ {C.C8_문턱})** — 표본 150건 중 {len(fin)}건 멈춤 "
+          f"(개입률 {100*len(fin)/len(rows):.0f}%), 자동 발송 {len(rows) - len(fin)}건.", "",
+          "- 놓침을 막는 쪽을 골랐다(4단계 결정 A): 틀린 보고서가 고객에게 가면 되돌릴 수 없고, 헛멈춤은 검토 시간만 든다. "
+          "v2 에서도 '고객이 옮겨 쓸 구체 사실' 은 하나라도 근거가 없으면 멈춘다.",
+          "- 대가: 4단계 판정지(AI 검토 참고, 표현 문제까지 지적한 엄격한 판정) 기준으로는 놓침이 3 → 10/25 로 는다. "
+          "두 번의 사람 판단(엄격한 판정지 대 운영 중 상식 판단)이 달랐고, 운영 쪽을 따랐다.",
           "- 사람 판정 🔴(중요 수정) 문장 75개 중 AI 검수가 잡은 것은 22개(29%) — AI 검수는 '인용 원문에 있는가' 를 보고, "
           "사람(과 참고한 AI 검토)은 배경지식으로 사실 자체를 봤다. 기준이 못 잡는 오류가 남는다는 뜻이다.", ""]
 

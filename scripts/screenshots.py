@@ -25,10 +25,11 @@ def main():
         page = browser.new_page(viewport={"width": 1440, "height": 1000}, device_scale_factor=1)
         page.goto(URL)
         page.wait_for_selector("text=SME 리서치 보고서", timeout=30000)
-        page.wait_for_timeout(3000)
+        page.wait_for_selector("[data-testid=stDataFrame]", timeout=60000)
+        page.wait_for_timeout(6000)
 
         def 찍기(name, full=False):
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2500)
             page.screenshot(path=str(OUT / f"{name}.png"), full_page=full)
             print("저장", OUT / f"{name}.png")
 
