@@ -1,0 +1,37 @@
+$ python step1_skeleton.py start
+[F1] ㈜한빛정밀 투입
+   → 발송: ㈜한빛정밀
+[F2] ㈜대성금속 투입
+   ⏸ 멈춤 — 이유: 출처 표시 없는 수치 문장 1개
+[F3] ㈜푸른식품 투입
+   ⏸ 멈춤 — 이유: 지표 경보 1개 (예: 읽지 않은 문서 인용)
+
+$ python step1_skeleton.py list
+파일 step1_checkpoints.sqlite 에서 찾은 대기 건: 2건
+ - F2  다음 단계=('검토',)  고객=㈜대성금속  멈춘 이유=['출처 표시 없는 수치 문장 1개']
+        통과시키면: ㈜대성금속 에게 보고서(29자)가 발송됩니다
+ - F3  다음 단계=('검토',)  고객=㈜푸른식품  멈춘 이유=['지표 경보 1개 (예: 읽지 않은 문서 인용)']
+        통과시키면: ㈜푸른식품 에게 보고서(45자)가 발송됩니다
+
+$ python step1_skeleton.py resume F2 approve
+[F2] 담당자 답: approve  (재개 전 다음 단계=('검토',))
+   → 발송: ㈜대성금속
+   결과=발송  재개 후 다음 단계=()  쌓인 체크포인트=5개
+
+$ python step1_skeleton.py resume F3 reject
+[F3] 담당자 답: reject  (재개 전 다음 단계=('검토',))
+   → 반려: ㈜푸른식품 (발송하지 않음)
+   결과=반려  재개 후 다음 단계=()  쌓인 체크포인트=5개
+
+$ python step1_skeleton.py resume F1 approve
+F1 는 대기 중이 아니다 (결과: 발송)
+
+$ python step1_skeleton.py list
+파일 step1_checkpoints.sqlite 에서 찾은 대기 건: 0건
+
+$ python step1_skeleton.py trap
+[나쁜 구조] 멈춘 직후 고객이 받은 알림: 1통
+[나쁜 구조] 재개 후   고객이 받은 알림: 2통
+[고친 구조] 멈춘 직후 고객이 받은 알림: 1통
+[고친 구조] 재개 후   고객이 받은 알림: 1통
+
