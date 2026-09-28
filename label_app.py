@@ -35,7 +35,7 @@ def 고르기() -> list[dict]:
 
 @st.cache_data
 def 대목표() -> dict:
-    return {x["id"]: x for x in map(json.loads, (J.WORK / "items.jsonl").read_text(encoding="utf-8").splitlines())}
+    return J.대목표()
 
 
 def 판정들() -> dict:

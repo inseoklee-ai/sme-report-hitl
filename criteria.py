@@ -127,6 +127,17 @@ def C7_고위험주제(rec: dict) -> list[str]:
     return [w for w in 고위험어 if w in 글]
 
 
+def C8_AI검수(rec: dict, k: int = 4) -> list[str]:
+    """AI 검수(judge.검수 — 문장마다 인용 원문 대목과 대조, gpt-4o)에서 근거없음·모순·대상착오 문장이 k개 이상.
+    검수 결과가 없는 기록(검수 전)은 계산하지 않는다. 검수에 실패한 문장이 있으면 확인할 수 없으니 멈춘다."""
+    g = rec.get("검수")
+    if not g:
+        return []
+    bad = [f"[{s['번호']}] {s['판정']} — {s['이유']}" for s in g["문장"] if s["판정"] in ("근거없음", "모순", "대상착오")]
+    fail = [f"AI 검수 실패 문장 {g['판정실패']}개 — 확인할 수 없어 사람에게"] if g["판정실패"] else []
+    return fail + bad if (fail or len(bad) >= k) else []
+
+
 후보 = {
     "C1": ("출처 없는 수치", C1_출처없는수치),
     "C2": ("인용 원문에 없는 숫자", C2_원문에없는숫자),
@@ -135,12 +146,17 @@ def C7_고위험주제(rec: dict) -> list[str]:
     "C5": ("부족한 절 남음", C5_부족한절남음),
     "C6": ("국내 질문에 해외 근거", C6_국내질문_해외근거),
     "C7": ("고위험 주제어", C7_고위험주제),
+    "C8": ("AI 검수 오류 문장 4개 이상", C8_AI검수),
 }
 
-켜진기준 = ["C1", "C2", "C3"]          # 4단계에서 검증 후 확정한다 (지금은 2단계 임시 기준과 같은 셋)
+# 4단계에서 확정 (docs/evidence/step4_validation.md). 놓침을 막는 쪽(A)을 골랐다 —
+# C2·C3·C6 은 걸리면 거의 확실히 진짜 문제(헛멈춤 ≈ 0)라 싸고 빠른 1차 관문, C8 은 문장을 원문과 대조해 읽어야만 잡히는 오류.
+# C1(표본에서 0건) · C4 · C5 · C7(헛멈춤이 크거나 C8 과 겹친다) 은 끈다.
+켜진기준 = ["C2", "C3", "C6", "C8"]
 
 
 def 전부재기(rec: dict) -> dict[str, list]:
+    """C1~C8. C8 은 rec 에 '검수' 가 있을 때만 값이 있다 (4단계 검증은 validate_criteria 가 따로 붙인다)."""
     return {k: fn(rec) for k, (_, fn) in 후보.items()}
 
 
@@ -148,6 +164,11 @@ def 판정(rec: dict, 켜진: list[str] | None = None) -> list[str]:
     이유 = []
     for k in 켜진 or 켜진기준:
         이름, fn = 후보[k]
-        if hits := fn(rec):
+        if not (hits := fn(rec)):
+            continue
+        if k == "C8":
+            g = rec["검수"]
+            이유.append(f"C8 AI 검수 — 오류 문장 {g['오류수']}개" + (f" · 검수 실패 {g['판정실패']}개" if g["판정실패"] else ""))
+        else:
             이유.append(f"{k} {이름} — {len(hits)}건")
     return 이유

@@ -27,7 +27,9 @@ import criteria as C
 import graph as G
 from scan_criteria import 불러오기
 
-WORK = G.OUT / "judge"
+WORK = G.OUT / "judge"                   # 임베딩(npz) — 다시 만들 수 있어 저장소에 올리지 않는다
+CACHE = G.ROOT / "data" / "judge"         # 문장별 대목 · 판정 — 저장소에 올린다 (지난 기록 시연을 키 없이)
+ITEMS, VERDICTS = CACHE / "items.jsonl", CACHE / "verdicts.jsonl"
 LABELS = G.ROOT / "data" / "labels"
 EMB_MODEL = "text-embedding-3-small"
 JUDGE_MODEL = "gpt-4o"
@@ -117,9 +119,24 @@ def 문항들() -> list[dict]:
 
 
 def 대목붙이기(items: list[dict]) -> list[dict]:
-    f = WORK / "items.jsonl"
-    if f.exists():
-        return [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines()]
+    """items.jsonl 에 이미 있는 문장은 그대로 쓰고, 없는 문장만 대목을 찾아 덧붙인다 (검증용 표본 · 파이프라인 공용)."""
+    have = 대목표()
+    new = [x for x in items if x["id"] not in have]
+    if new:
+        _대목찾기(new)
+        CACHE.mkdir(parents=True, exist_ok=True)
+        with ITEMS.open("a", encoding="utf-8") as fh:
+            for x in new:
+                fh.write(json.dumps(x, ensure_ascii=False) + "\n")
+                have[x["id"]] = x
+    return [have[x["id"]] for x in items]
+
+
+def 대목표() -> dict[str, dict]:
+    return {x["id"]: x for x in map(json.loads, ITEMS.read_text(encoding="utf-8").splitlines())} if ITEMS.exists() else {}
+
+
+def _대목찾기(items: list[dict]) -> None:
     chunks, cv = 조각임베딩()
     by_title: dict[str, list[int]] = {}
     for i, (t, _) in enumerate(chunks):
@@ -140,10 +157,6 @@ def 대목붙이기(items: list[dict]) -> list[dict]:
         x["대목"] = [{"문서": chunks[i][0], "글": chunks[i][1]} for i in top]
     for x in items:
         x.setdefault("대목", [])
-    with f.open("w", encoding="utf-8") as fh:
-        for x in items:
-            fh.write(json.dumps(x, ensure_ascii=False) + "\n")
-    return items
 
 
 # ── 3. 판정 ──────────────────────────────────────────────────────────────────
@@ -192,15 +205,11 @@ def 추산(items: list[dict]) -> dict:
             "달러": round(tin / 1e6 * pin + tout / 1e6 * pout, 2)}
 
 
-def 판정하기(limit: int | None = None):
-    items = 대목붙이기(문항들())
-    done_f = WORK / "verdicts.jsonl"
-    done = {json.loads(l)["id"] for l in done_f.read_text(encoding="utf-8").splitlines()} if done_f.exists() else set()
-    todo = [b for b in 묶기(items) if any(x["id"] not in done for x in b)]
-    if limit:
-        todo = todo[:limit]
+def _판정묶음들(todo: list[list[dict]], verbose: bool = True) -> dict:
+    """묶음마다 gpt-4o 한 번. 판정은 verdicts.jsonl 에 바로 덧붙인다 — 끊겨도 다음 실행이 이어서 한다."""
     cl, tin, tout = _client(), 0, 0
-    print(f"남은 묶음 {len(todo)}개 (완료 문장 {len(done)})")
+    pin, pout = PRICE[JUDGE_MODEL]
+    CACHE.mkdir(parents=True, exist_ok=True)
     for k, b in enumerate(todo, 1):
         r = cl.chat.completions.create(model=JUDGE_MODEL, temperature=0, response_format={"type": "json_object"},
                                        messages=[{"role": "system", "content": SYSTEM},
@@ -208,20 +217,50 @@ def 판정하기(limit: int | None = None):
         tin += r.usage.prompt_tokens
         tout += r.usage.completion_tokens
         got = {v.get("i"): v for v in json.loads(r.choices[0].message.content).get("판정", [])}
-        with done_f.open("a", encoding="utf-8") as fh:
+        with VERDICTS.open("a", encoding="utf-8") as fh:
             for n, x in enumerate(b, 1):
                 v = got.get(n, {"판정": "판정실패", "이유": "응답에 없음"})
                 fh.write(json.dumps({"id": x["id"], "판정": v.get("판정"), "구체": bool(v.get("구체")),
                                      "이유": v.get("이유", "")},
                                     ensure_ascii=False) + "\n")
-        if k % 20 == 0 or k == len(todo):
-            pin, pout = PRICE[JUDGE_MODEL]
+        if verbose and (k % 20 == 0 or k == len(todo)):
             print(f"  {k}/{len(todo)} · 토큰 {tin:,}+{tout:,} · {tin/1e6*pin + tout/1e6*pout:.2f}달러")
+    return {"호출": len(todo), "입력토큰": tin, "출력토큰": tout, "달러": round(tin / 1e6 * pin + tout / 1e6 * pout, 4)}
+
+
+def 판정하기(limit: int | None = None):
+    items = 대목붙이기(문항들())
+    done = set(판정표())
+    todo = [b for b in 묶기(items) if any(x["id"] not in done for x in b)]
+    if limit:
+        todo = todo[:limit]
+    print(f"남은 묶음 {len(todo)}개 (완료 문장 {len(done)})")
+    _판정묶음들(todo)
 
 
 def 판정표() -> dict[str, dict]:
-    f = WORK / "verdicts.jsonl"
-    return {v["id"]: v for v in map(json.loads, f.read_text(encoding="utf-8").splitlines())} if f.exists() else {}
+    return {v["id"]: v for v in map(json.loads, VERDICTS.read_text(encoding="utf-8").splitlines())} \
+        if VERDICTS.exists() else {}
+
+
+def 검수(질문: str, report: str) -> dict:
+    """파이프라인의 검수 노드가 부른다 — 보고서 한 건의 문장마다 판정. 이미 판정한 문장은 캐시에서 꺼내므로
+    지난 기록(표본 150건)은 비용 0, 새 보고서는 약 2센트."""
+    sents = C._본문(report)
+    items = [{"id": _h(질문, s), "qid": None, "질문": 질문, "문장": s, "인용": C.CITE.findall(s)} for s in sents]
+    uniq = list({x["id"]: x for x in items}.values())
+    uniq = 대목붙이기(uniq)
+    have = 판정표()
+    todo = [x for x in uniq if x["id"] not in have]
+    cost = _판정묶음들(묶기(todo), verbose=False) if todo else {"호출": 0, "달러": 0.0}
+    have = 판정표() if todo else have
+    full = {x["id"]: x for x in uniq}
+    문장들 = [{"번호": n, "문장": x["문장"], "대목": full[x["id"]]["대목"],
+             **{k: have.get(x["id"], {}).get(k) for k in ("판정", "구체", "이유")}}
+            for n, x in enumerate(items, 1)]
+    return {"문장": 문장들, "오류수": sum(1 for s in 문장들 if s["판정"] in 오류판정),
+            "판정실패": sum(1 for s in 문장들 if s["판정"] not in 오류판정 | {"뒷받침", "일반서술"}),
+            "비용": cost, "모델": JUDGE_MODEL}
 
 
 def 보고서라벨():

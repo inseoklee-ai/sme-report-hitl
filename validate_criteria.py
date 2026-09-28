@@ -115,6 +115,29 @@ def main():
             for b in errs:
                 L.append(f"  - {b['판정']} ({b['이유']}) — {b['문장'][:100]}")
 
+    # ④ C8 을 더한 최종 기준 — 사람 판정 30건으로만 잰다 (AI 판정 정답과 C8 은 같은 판정이라 순환)
+    for r in rows:
+        r["검수"] = J.검수(r["질문"], r["report"])          # 캐시에서 꺼낸다 — API 호출 없음
+    hs = [r for r in rows if r["run_id"] in human]
+    code = lambda r: any(C.전부재기(r)[k] for k in ("C2", "C3", "C6"))
+    n_stop = sum(human[r["run_id"]]["should_stop"] for r in hs)
+    L += ["", "## 4. C8 (AI 검수) 문턱 — 사람 판정 30건 기준", "",
+          f"사람 판정: 멈춤 {n_stop} · 통과 {len(hs) - n_stop}. 정답이 AI 판정이면 C8 이 자기 자신과 비교되므로(순환) "
+          "여기서는 사람 판정만 정답으로 쓴다. 사람 판정은 AI 검토 도구를 참고했다(AI 보조 사람 판정).", "",
+          "| 기준 (C2·C3·C6 과 함께) | 사람 기준 놓침 | 사람 기준 헛멈춤 | 표본 150건 개입률 |", "|---|---:|---:|---:|"]
+    for k in (1, 2, 3, 4, 5, 6, 8, 10):
+        stop = lambda r: code(r) or bool(C.C8_AI검수(r, k))
+        fn = sum(1 for r in hs if human[r["run_id"]]["should_stop"] and not stop(r))
+        fp = sum(1 for r in hs if not human[r["run_id"]]["should_stop"] and stop(r))
+        L.append(f"| C8 오류 ≥ {k}{' ← 채택' if k == 4 else ''} | {fn}/{n_stop} | {fp}/{len(hs) - n_stop} | "
+                 f"{100 * sum(1 for r in rows if stop(r)) / len(rows):.0f}% |")
+    fin = [r for r in rows if C.판정(r)]
+    L += ["", f"**최종 기준 {' · '.join(C.켜진기준)}** — 표본 150건 중 {len(fin)}건 멈춤 (개입률 {100*len(fin)/len(rows):.0f}%), "
+          f"자동 발송 {len(rows) - len(fin)}건.", "",
+          "- 놓침을 막는 쪽을 골랐다(4단계 결정 A): 틀린 보고서가 고객에게 가면 되돌릴 수 없고, 헛멈춤은 검토 시간만 든다.",
+          "- 사람 판정 🔴(중요 수정) 문장 75개 중 AI 검수가 잡은 것은 22개(29%) — AI 검수는 '인용 원문에 있는가' 를 보고, "
+          "사람(과 참고한 AI 검토)은 배경지식으로 사실 자체를 봤다. 기준이 못 잡는 오류가 남는다는 뜻이다.", ""]
+
     OUT.write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
 

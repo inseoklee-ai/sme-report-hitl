@@ -1,16 +1,17 @@
 """사람이 승인하는 보고서 발송 파이프라인.
 
-    python hitl.py past                       # 지난 기록(질문 11건 '기본' 조건)을 의뢰로 투입 — 키 없음
+    python hitl.py past [--n 20]              # 지난 기록(4단계 표본 150건 중 n건)을 의뢰로 투입 — 검수가 캐시돼 키 없음
     python hitl.py new M2 --고객 "가상고객 B"   # 새 의뢰 — 딥리서치를 실제로 돌린다(키 필요)
     python hitl.py list                       # 대기 건
     python hitl.py answer <의뢰ID> approve     # 담당자 답 → 멈춘 자리부터 이어감
     python hitl.py answer <의뢰ID> reject --사유 "수치 출처 확인 필요"
 
-접수 → 조사 → 판정 ─(안 걸림)──────────────────────────→ 발송 → END
-                   └(걸림)→ 알림 → 검토[interrupt] ─approve→ 발송 → END
-                                                 └reject─→ 반려기록 → END
+접수 → 조사 → 검수 → 판정 ─(안 걸림)──────────────────────────→ 발송 → END
+                          └(걸림)→ 알림 → 검토[interrupt] ─approve→ 발송 → END
+                                                        └reject─→ 반려기록 → END
 
-원칙(1단계에서 확인): 검토 단계 안에는 interrupt 만 둔다. 조사(비싸다)·알림·발송(바깥으로 나간다)은
+검수 = 문장마다 인용 원문 대목과 대조하는 AI 검수(judge.검수, gpt-4o). 판정 = criteria.켜진기준 (C2·C3·C6·C8).
+원칙(1단계에서 확인): 검토 단계 안에는 interrupt 만 둔다. 조사·검수(비싸다)·알림·발송(바깥으로 나간다)은
 모두 다른 단계 — 재개할 때 검토 단계가 처음부터 다시 실행되어도 아무것도 두 번 일어나지 않는다.
 """
 from __future__ import annotations
@@ -29,6 +30,7 @@ from langgraph.types import Command, interrupt
 
 import criteria
 import graph as G
+import judge
 import mailer
 
 DB = G.OUT / "checkpoints.sqlite"
@@ -86,6 +88,18 @@ def 조사(s: State) -> dict:
     return {"보고서": 간추리기(rec)}
 
 
+def 검수(s: State) -> dict:
+    """AI 검수. 실패하면(키 없음·한도 초과 등) 통과시키지 않고 '확인 못 함' 으로 남긴다 — C8 이 사람에게 보낸다."""
+    r = s["보고서"]
+    try:
+        g = judge.검수(r["질문"], r["report"])
+    except Exception as e:                        # 키 문자열이 섞이지 않게 예외 종류와 짧은 설명만
+        n = len(criteria._본문(r["report"]))
+        g = {"문장": [], "오류수": 0, "판정실패": n or 1, "비용": {"호출": 0, "달러": 0.0},
+             "오류": f"{type(e).__name__}: {str(e)[:120]}"}
+    return {"보고서": {**r, "검수": g}}
+
+
 def 판정(s: State) -> dict:
     return {"멈춘이유": criteria.판정(s["보고서"])}
 
@@ -106,6 +120,7 @@ def 검토(s: State) -> dict:
         "의뢰ID": q["id"], "고객": q["고객"], "수신자": q["수신자"], "질문": q["질문"], "접수시각": q["접수시각"],
         "보고서제목": r["제목"], "보고서자수": len(r["report"]),
         "멈춘 이유": s["멈춘이유"],
+        "검수 오류 문장": [x for x in r.get("검수", {}).get("문장", []) if x["판정"] in judge.오류판정],
         "통과시키면": f"{q['고객']} <{q['수신자']}> 에게 보고서 「{r['제목']}」({len(r['report']):,}자)가 발송됩니다",
     })
     if isinstance(답, str):
@@ -126,12 +141,13 @@ def 반려기록(s: State) -> dict:
 
 def build(checkpointer):
     g = StateGraph(State)
-    for name, fn in [("접수", 접수), ("조사", 조사), ("판정", 판정), ("알림", 알림),
+    for name, fn in [("접수", 접수), ("조사", 조사), ("검수", 검수), ("판정", 판정), ("알림", 알림),
                      ("검토", 검토), ("발송", 발송), ("반려기록", 반려기록)]:
         g.add_node(name, fn)
     g.add_edge(START, "접수")
     g.add_edge("접수", "조사")
-    g.add_edge("조사", "판정")
+    g.add_edge("조사", "검수")
+    g.add_edge("검수", "판정")
     g.add_conditional_edges("판정", lambda s: "알림" if s["멈춘이유"] else "발송", ["알림", "발송"])
     g.add_edge("알림", "검토")
     g.add_conditional_edges("검토", lambda s: "발송" if s["답"].get("결정") == "approve" else "반려기록",
@@ -200,12 +216,16 @@ def 상태(tid: str) -> dict:
          "가상고객 J (정밀기계 50인)", "가상고객 K (포장재 22인)"]
 
 
-def 지난의뢰들(라벨: str = "기본", 반복: int = 1) -> list[의뢰]:
-    rows = [json.loads(l) for l in (PAST / "ablation_runs.jsonl").read_text(encoding="utf-8").splitlines()]
-    rows = [r for r in rows if r["라벨"] == 라벨 and r["실험"]["반복"] == 반복]
-    return [{"id": f"P-{r['qid']}-{라벨}-{반복}", "고객": 가상고객[i % len(가상고객)], "수신자": DEMO_TO,
+def 지난의뢰들(n: int | None = None) -> list[의뢰]:
+    """4단계 표본 150건(검수 판정이 캐시에 있어 비용 0)을 질문이 골고루 섞이게 줄 세운다 — 앞에서 n건."""
+    by_q: dict[str, list] = {}
+    for r in judge.표본():
+        by_q.setdefault(r["qid"], []).append(r)
+    order = [r for i in range(max(map(len, by_q.values()))) for q in sorted(by_q) if i < len(by_q[q])
+             for r in [by_q[q][i]]]
+    return [{"id": f"P-{r['qid']}-{r['run_id'][-4:]}", "고객": 가상고객[i % len(가상고객)], "수신자": DEMO_TO,
              "질문": r["질문"], "qid": r["qid"], "입구": "지난 기록", "past_run_id": r["run_id"]}
-            for i, r in enumerate(rows)]
+            for i, r in enumerate(order[:n])]
 
 
 def main():
@@ -213,7 +233,7 @@ def main():
     ap = argparse.ArgumentParser(description="사람이 승인하는 보고서 발송")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("past", help="지난 기록 투입 — 시험용이라 항상 파일 모드")
-    p.add_argument("--라벨", default="기본"); p.add_argument("--반복", type=int, default=1)
+    p.add_argument("--n", type=int, default=20, help="표본 150건 중 몇 건 (기본 20)")
     n = sub.add_parser("new"); n.add_argument("q"); n.add_argument("--고객", default="가상고객 Z")
     n.add_argument("--수신자", default=None, help="기본: 허용 목록 첫 주소, 없으면 가상 주소")
     n.add_argument("--file", action="store_true")
@@ -223,7 +243,7 @@ def main():
     a = ap.parse_args()
 
     if a.cmd == "past":
-        for q in 지난의뢰들(a.라벨, a.반복):
+        for q in 지난의뢰들(a.n):
             if q["id"] in 전체():
                 print(f"[{q['id']}] 이미 투입됨 — 건너뜀"); continue
             r = 투입({**q, "force_file": True})
