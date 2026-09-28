@@ -64,9 +64,9 @@ def 접수(s: State) -> dict:
 
 def 간추리기(rec: dict) -> dict:
     return {"run_id": rec["run_id"], "제목": (rec.get("plan") or {}).get("제목") or rec["질문"], "질문": rec["질문"],
-            "report": rec["report"], "metrics": rec["metrics"],
-            "sections": [{"절": x["절"], "본문": x["본문"], "인용": x.get("인용", []), "읽은문서": x.get("읽은문서", [])}
-                         for x in rec["sections"]]}
+            "report": rec["report"], "metrics": rec["metrics"], "채택": rec.get("채택") or {},
+            "sections": [{k: x.get(k) for k in ("번호", "바퀴", "절", "본문", "인용", "읽은문서", "충분", "부족")}
+                         for x in rec.get("sections", [])]}
 
 
 def 지난기록(run_id: str) -> dict:
