@@ -1,0 +1,31 @@
+# 비밀 — API 키는 저장소에 올리지 않는다 (키는 C:\Users\lis29\projects\keys.env 에서 읽는다)
+.env
+*.env
+keys.env
+
+# 파이썬 · 가상환경
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 위키백과 API 응답 캐시 — scripts/collect_corpus.py 를 다시 돌리면 생긴다
+cache/
+
+# 에디터 · OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# 에디터 도구 설정
+.claude/
+output/dev/streamlit.log
+
+# Streamlit 비밀값 — 저장소에 올리지 않는다
+.streamlit/secrets.toml
+
+# 승인 대기 건 저장소(체크포인터) — 고객 보고서가 쌓이므로 올리지 않는다
+*.sqlite
+*.sqlite-*
+*.db
